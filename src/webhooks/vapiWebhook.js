@@ -3,31 +3,35 @@ const router = express.Router();
 const { handleCallResult } = require('../services/verificationService');
 const { error } = require('../utils/apiResponse');
 
-// Handle POST /webhook/vapi-end-call
 router.post('/vapi-end-call', (req, res) => {
+  console.log('Webhook received:', {
+    headers: req.headers,
+    body: req.body
+  });
   try {
-    const callData = req.body;
-    if (!callData || !callData.id) {
-      return error(res, 'Invalid webhook payload: Missing call ID', 400);
+    const message = req.body?.message || {};
+    if (message.type !== 'end-of-call-report') {
+      console.log('Ignoring non-end-of-call-report message:', message.type);
+      return res.status(200).json({ success: true });
     }
 
-    // Extract relevant fields from webhook payload
-    const { id, status, endedReason, analysis } = callData;
-    const jobId = callData.metadata?.jobId; // We'll add this metadata when making the call
-    const phoneNumberId = callData.phoneNumberId;
+    const callData = message.call || {};
+    const id = callData.id || 'unknown';
+    const endedReason = message.endedReason || callData.endedReason;
+    const analysis = callData.analysis || {};
+    const jobId = callData.metadata?.jobId;
+    const phoneNumberId = callData.phoneNumberId || 'unknown';
     const lead = callData.metadata?.lead;
 
-    if (!jobId || !phoneNumberId || !lead) {
-      return error(res, 'Invalid webhook payload: Missing jobId, phoneNumberId, or lead', 400);
+    if (!jobId || !lead) {
+      console.warn('Webhook missing critical data:', { jobId, lead });
+      return error(res, 'Missing jobId or lead in webhook payload', 400);
     }
 
-    // Process the call result
-    handleCallResult(jobId, { id, status, endedReason, analysis }, lead, phoneNumberId);
-
-    // Respond to vapi.ai to acknowledge receipt
+    handleCallResult(jobId, { id, status: 'ended', endedReason, analysis }, lead, phoneNumberId);
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error('Webhook error:', err.message);
+    console.error('Webhook error:', err.message, err.stack);
     error(res, 'Failed to process webhook', 500);
   }
 });
