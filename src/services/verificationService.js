@@ -79,7 +79,17 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
           model: {
             provider: config.MODEL_PROVIDER,
             model: config.MODEL_NAME,
-            messages: [{ role: "system", content: assistantPrompt }]
+            messages: [{ role: "system", content: assistantPrompt }],
+            tools: [
+              {
+                type: "endCall",
+                function: {
+                  name: "endCall",
+                  description: "Ends the call immediately when verification status is determined.",
+                  parameters: {}
+                }
+              }
+            ]
           },
           transcriber: {
             provider: config.TRANSCRIBER_PROVIDER,
@@ -102,17 +112,7 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
           },
           server: {
             url: config.WEBHOOK_URL
-          },
-          tools: [
-            {
-              type: "endCall",
-              function: {
-                name: "endCall",
-                description: "Ends the call immediately when verification status is determined.",
-                parameters: {}
-              }
-            }
-          ]
+          }
         },
         maxDurationSeconds: config.MAX_DURATION,
         metadata: { jobId, lead }
