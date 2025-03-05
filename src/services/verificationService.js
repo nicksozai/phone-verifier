@@ -61,46 +61,51 @@ const processNextLeads = (jobId) => {
   });
 };
 
-// Make a verification call to vapi.ai
 const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
   const assistantPrompt = buildAssistantPrompt(lead);
   const summaryPrompt = buildSummaryPrompt(lead);
 
+  // Validate phone number format (E.164)
+  if (!lead.phoneNumber.match(/^\+[1-9]\d{9,14}$/)) {
+    throw new Error(`Invalid phone number: ${lead.phoneNumber}. Must be E.164 (e.g., +12345678901)`);
+  }
+
   try {
     const response = await axios.post(
-      'https://api.vapi.ai/call',
+      "https://api.vapi.ai/call",
       {
         phoneNumberId,
         customer: { number: lead.phoneNumber },
         assistant: {
           model: {
-            provider: config.MODEL_PROVIDER,
-            model: config.MODEL_NAME,
-            prompt: assistantPrompt
+            provider: config.MODEL_PROVIDER, // "openai"
+            model: config.MODEL_NAME,        // "gpt-4o-mini"
+            messages: [{ role: "system", content: assistantPrompt }]
           },
           transcriber: {
-            provider: config.TRANSCRIBER_PROVIDER,
-            model: config.TRANSCRIBER_MODEL
+            provider: config.TRANSCRIBER_PROVIDER, // "deepgram"
+            model: "nova-2"                       // Changed to nova-2 for safety
           },
           voice: {
-            provider: config.VOICE_PROVIDER,
-            voiceId: config.VOICE_ID
+            provider: config.VOICE_PROVIDER, // "deepgram"
+            voiceId: config.VOICE_ID         // "asteria"
           },
-          firstMessageMode: 'assistant-waits-for-user',
+          firstMessageMode: "assistant-waits-for-user",
           endCallMessage: config.END_CALL_MESSAGE,
           analysisPlan: {
             summaryPlan: {
               enabled: true,
               messages: [
-                { role: 'system', content: summaryPrompt },
-                { role: 'user', content: 'Transcript: {{transcript}}' }
+                { role: "system", content: summaryPrompt },
+                { role: "user", content: "Transcript: {{transcript}}" }
               ]
             }
+          },
+          server: {
+            url: config.WEBHOOK_URL
           }
         },
-        serverUrl: config.WEBHOOK_URL,
-        silenceTimeoutSeconds: config.SILENCE_TIMEOUT,
-        maxDurationSeconds: config.MAX_DURATION,
+        maxDurationSeconds: config.MAX_DURATION, // 30
         metadata: { jobId, lead }
       },
       {
@@ -111,10 +116,10 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
   } catch (error) {
     console.error(`Error calling ${lead.phoneNumber}:`, error.response?.data || error.message);
     handleCallResult(jobId, {
-      id: 'error-' + Date.now(),
-      status: 'ended',
-      endedReason: 'error',
-      analysis: { summary: '' }
+      id: "error-" + Date.now(),
+      status: "ended",
+      endedReason: "error",
+      analysis: { summary: "" }
     }, lead, phoneNumberId);
   }
 };
