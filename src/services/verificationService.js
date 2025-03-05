@@ -9,7 +9,7 @@ const jobs = new Map();
 // Fetch available Twilio numbers from vapi.ai
 const fetchPhoneNumbers = async () => {
   try {
-    const response = await axios.get('https://api.vapi.ai/phone-numbers', {
+    const response = await axios.get('https://api.vapi.ai/phone-number', {
       headers: { Authorization: `Bearer ${config.VAPI_API_KEY}` }
     });
     return response.data.map(phone => ({
