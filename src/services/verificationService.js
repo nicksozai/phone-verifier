@@ -101,7 +101,7 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
         serverUrl: config.WEBHOOK_URL,
         silenceTimeoutSeconds: config.SILENCE_TIMEOUT,
         maxDurationSeconds: config.MAX_DURATION,
-        metadata: { jobId, lead } // Add metadata for webhook
+        metadata: { jobId, lead }
       },
       {
         headers: { Authorization: `Bearer ${config.VAPI_API_KEY}` }
@@ -109,7 +109,7 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
     );
     console.log(`Started call ${response.data.id} for ${lead.phoneNumber}`);
   } catch (error) {
-    console.error(`Error calling ${lead.phoneNumber}:`, error.message);
+    console.error(`Error calling ${lead.phoneNumber}:`, error.response?.data || error.message);
     handleCallResult(jobId, {
       id: 'error-' + Date.now(),
       status: 'ended',
