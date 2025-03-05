@@ -86,7 +86,10 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
                 function: {
                   name: "endCall",
                   description: "Ends the call immediately when verification status is determined.",
-                  parameters: {}
+                  parameters: {
+                    type: "object",
+                    properties: {}
+                  }
                 }
               }
             ]
