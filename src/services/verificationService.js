@@ -25,23 +25,21 @@ const fetchPhoneNumbers = async () => {
 
 // Start a new verification job
 const startVerificationJob = async (leads) => {
-  const jobId = Date.now().toString(); // Simple unique ID based on timestamp
+  const jobId = Date.now().toString();
   const phoneNumbers = await fetchPhoneNumbers();
 
   if (phoneNumbers.length === 0) {
     throw new Error('No Twilio numbers available');
   }
 
-  // Initialize job
   jobs.set(jobId, {
-    leads: leads.slice(), // Queue of leads to process
-    results: [],          // Completed leads with verification status
-    phoneNumbers,         // Available Twilio numbers
-    total: leads.length,  // Total leads for progress tracking
-    completed: 0          // Completed leads count
+    leads: leads.slice(),
+    results: [],
+    phoneNumbers,
+    total: leads.length,
+    completed: 0
   });
 
-  // Start processing with available phone numbers
   processNextLeads(jobId);
   return jobId;
 };
@@ -54,7 +52,7 @@ const processNextLeads = (jobId) => {
   const availableNumbers = job.phoneNumbers.filter(p => !p.inUse);
   availableNumbers.forEach(phone => {
     if (job.leads.length > 0) {
-      const lead = job.leads.shift(); // Remove and get the next lead
+      const lead = job.leads.shift();
       phone.inUse = true;
       makeVerificationCall(jobId, lead, phone.id);
     }
@@ -86,22 +84,13 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
                 function: {
                   name: "endCall",
                   description: "Ends the call immediately when verification status is determined.",
-                  parameters: {
-                    type: "object",
-                    properties: {}
-                  }
+                  parameters: { type: "object", properties: {} }
                 }
               }
             ]
           },
-          transcriber: {
-            provider: config.TRANSCRIBER_PROVIDER,
-            model: "nova-2"
-          },
-          voice: {
-            provider: config.VOICE_PROVIDER,
-            voiceId: config.VOICE_ID
-          },
+          transcriber: { provider: config.TRANSCRIBER_PROVIDER, model: "nova-2" },
+          voice: { provider: config.VOICE_PROVIDER, voiceId: config.VOICE_ID },
           firstMessageMode: "assistant-waits-for-user",
           endCallMessage: config.END_CALL_MESSAGE,
           analysisPlan: {
@@ -113,18 +102,29 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
               ]
             }
           },
-          server: {
-            url: config.WEBHOOK_URL
-          }
+          server: { url: config.WEBHOOK_URL }
         },
         maxDurationSeconds: config.MAX_DURATION,
         metadata: { jobId, lead }
       },
-      {
-        headers: { Authorization: `Bearer ${config.VAPI_API_KEY}` }
-      }
+      { headers: { Authorization: `Bearer ${config.VAPI_API_KEY}` } }
     );
     console.log(`Started call ${response.data.id} for ${lead.phoneNumber}`);
+
+    // Timeout: 2x ringing attempts + buffer
+    const timeoutMs = (2 * config.MAX_DURATION + 60) * 1000; // e.g., 120s if MAX_DURATION is 30s
+    setTimeout(() => {
+      const job = jobs.get(jobId);
+      if (job && job.phoneNumbers.find(p => p.id === phoneNumberId)?.inUse) {
+        console.warn(`Timeout: No webhook received for call to ${lead.phoneNumber}`);
+        handleCallResult(jobId, {
+          id: response.data.id,
+          status: 'ended',
+          endedReason: 'timeout',
+          analysis: { summary: '' }
+        }, lead, phoneNumberId);
+      }
+    }, timeoutMs);
   } catch (error) {
     console.error(`Error calling ${lead.phoneNumber}:`, error.response?.data || error.message);
     handleCallResult(jobId, {
@@ -141,36 +141,17 @@ const handleCallResult = (jobId, callData, lead, phoneNumberId) => {
   const job = jobs.get(jobId);
   if (!job) return;
 
-  // Determine verification status
-  let verificationStatus = callData.analysis?.summary || '';
-  if (!verificationStatus) {
-    switch (callData.endedReason) {
-      case 'customer-did-not-answer':
-        verificationStatus = 'No Answer';
-        break;
-      case 'busy':
-        verificationStatus = 'Busy';
-        break;
-      case 'voicemail':
-        verificationStatus = 'Voicemail';
-        break;
-      default:
-        verificationStatus = 'Error';
-    }
-  }
+  // Use summary if provided, otherwise raw endedReason
+  const verificationStatus = callData.analysis?.summary || callData.endedReason || 'unknown';
 
-  // Add result to job
   job.results.push({ ...lead, verificationStatus });
   job.completed++;
 
-  // Free the phone number
   const phone = job.phoneNumbers.find(p => p.id === phoneNumberId);
   if (phone) phone.inUse = false;
 
-  // Process next lead
   processNextLeads(jobId);
 
-  // Clean up if job is complete
   if (job.completed === job.total) {
     saveResultsToCSV(jobId);
   }

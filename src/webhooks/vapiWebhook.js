@@ -5,20 +5,23 @@ const { error } = require('../utils/apiResponse');
 
 router.post('/vapi-end-call', (req, res) => {
   const message = req.body?.message || {};
-  if (message.type !== 'end-of-call-report') {
-    return res.status(200).json({ success: true }); // Silently ignore non-end-of-call-report
+
+  // Only process end-of-call-report or status-update with status "ended"
+  if (message.type !== 'end-of-call-report' && !(message.type === 'status-update' && message.status === 'ended')) {
+    return res.status(200).json({ success: true }); // Silently ignore other messages
   }
 
-  console.log('Webhook received (end-of-call-report):', {
-    summary: message.analysis?.summary,
-    endedReason: message.endedReason
+  // Log minimal data for both types
+  console.log(`Webhook received (${message.type}):`, {
+    summary: message.analysis?.summary || 'N/A',
+    endedReason: message.endedReason || 'unknown'
   });
 
   try {
     const callData = message.call || {};
     const id = callData.id || 'unknown';
-    const endedReason = message.endedReason || callData.endedReason;
-    const analysis = message.analysis || callData.analysis || {};
+    const endedReason = message.endedReason || callData.endedReason || 'unknown';
+    const analysis = message.analysis || {}; // Empty if status-update, has summary if end-of-call-report
     const jobId = callData.metadata?.jobId;
     const phoneNumberId = callData.phoneNumberId || 'unknown';
     const lead = callData.metadata?.lead;
