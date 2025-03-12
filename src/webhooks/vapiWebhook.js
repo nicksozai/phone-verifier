@@ -1,9 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { handleCallResult } = require('../services/verificationService');
+const { callResults } = require('../utils/callResults');
 const { error } = require('../utils/apiResponse');
-
-const callResults = new Map(); // Track call statuses by call.id
 
 router.post('/vapi-end-call', (req, res) => {
   const message = req.body?.message || {};
@@ -34,9 +33,9 @@ router.post('/vapi-end-call', (req, res) => {
     const result = { id: callId, status: 'ended', endedReason: message.endedReason || 'unknown', analysis: message.analysis || {} };
 
     if (message.type === 'status-update') {
-      callResults.set(callId, result); // Store temporarily
+      callResults.set(callId, result);
     } else if (message.type === 'end-of-call-report') {
-      callResults.delete(callId); // Clear any prior status-update
+      callResults.delete(callId); // Clear pending status-update
       handleCallResult(jobId, result, lead, phoneNumberId);
     }
 

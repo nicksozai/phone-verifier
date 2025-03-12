@@ -1,10 +1,11 @@
 const axios = require('axios');
 const config = require('../config');
 const { buildAssistantPrompt, buildSummaryPrompt } = require('../utils/promptBuilder');
+const { callResults } = require('../utils/callResults');
 const fs = require('fs');
 
 const jobs = new Map();
-const MAX_CONCURRENT_CALLS = 8; // Match your 8 numbers
+const MAX_CONCURRENT_CALLS = 8;
 
 const fetchPhoneNumbers = async () => {
   try {
@@ -107,12 +108,12 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
       const job = jobs.get(jobId);
       if (!job || !job.phoneNumbers.find(p => p.id === phoneNumberId)?.inUse) return;
 
-      const { callResults } = require('../webhooks/vapiWebhook');
       const pendingResult = callResults.get(callId);
-      if (pendingResult) {
+      if (pendingResult && !pendingResult.analysis.summary) {
+        console.warn(`Timeout: Using status-update for call ${callId} to ${lead.phoneNumber}`);
         handleCallResult(jobId, pendingResult, lead, phoneNumberId);
         callResults.delete(callId);
-      } else {
+      } else if (!pendingResult) {
         console.warn(`Timeout: No webhook received for call ${callId} to ${lead.phoneNumber}`);
         handleCallResult(jobId, { id: callId, status: 'ended', endedReason: 'timeout', analysis: { summary: '' } }, lead, phoneNumberId);
       }
