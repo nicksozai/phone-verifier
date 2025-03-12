@@ -3,10 +3,9 @@ const config = require('../config');
 const { buildAssistantPrompt, buildSummaryPrompt } = require('../utils/promptBuilder');
 const fs = require('fs');
 
-// In-memory storage for jobs
 const jobs = new Map();
+const MAX_CONCURRENT_CALLS = 8; // Match your 8 numbers
 
-// Fetch available Twilio numbers from vapi.ai
 const fetchPhoneNumbers = async () => {
   try {
     const response = await axios.get('https://api.vapi.ai/phone-number', {
@@ -23,7 +22,6 @@ const fetchPhoneNumbers = async () => {
   }
 };
 
-// Start a new verification job
 const startVerificationJob = async (leads) => {
   const jobId = Date.now().toString();
   const phoneNumbers = await fetchPhoneNumbers();
@@ -37,26 +35,26 @@ const startVerificationJob = async (leads) => {
     results: [],
     phoneNumbers,
     total: leads.length,
-    completed: 0
+    completed: 0,
+    activeCalls: 0
   });
 
   processNextLeads(jobId);
   return jobId;
 };
 
-// Process the next leads in the queue
 const processNextLeads = (jobId) => {
   const job = jobs.get(jobId);
   if (!job || job.leads.length === 0) return;
 
   const availableNumbers = job.phoneNumbers.filter(p => !p.inUse);
-  availableNumbers.forEach(phone => {
-    if (job.leads.length > 0) {
-      const lead = job.leads.shift();
-      phone.inUse = true;
-      makeVerificationCall(jobId, lead, phone.id);
-    }
-  });
+  while (job.activeCalls < MAX_CONCURRENT_CALLS && job.leads.length > 0 && availableNumbers.length > 0) {
+    const lead = job.leads.shift();
+    const phone = availableNumbers.shift();
+    phone.inUse = true;
+    job.activeCalls++;
+    makeVerificationCall(jobId, lead, phone.id);
+  }
 };
 
 const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
@@ -67,6 +65,7 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
     throw new Error(`Invalid phone number: ${lead.phoneNumber}. Must be E.164 (e.g., +12345678901)`);
   }
 
+  let callId;
   try {
     const response = await axios.post(
       "https://api.vapi.ai/call",
@@ -78,16 +77,7 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
             provider: config.MODEL_PROVIDER,
             model: config.MODEL_NAME,
             messages: [{ role: "system", content: assistantPrompt }],
-            tools: [
-              {
-                type: "endCall",
-                function: {
-                  name: "endCall",
-                  description: "Ends the call immediately when verification status is determined.",
-                  parameters: { type: "object", properties: {} }
-                }
-              }
-            ]
+            tools: [{ type: "endCall", function: { name: "endCall", description: "Ends call when verified", parameters: { type: "object", properties: {} } } }]
           },
           transcriber: { provider: config.TRANSCRIBER_PROVIDER, model: "nova-2" },
           voice: { provider: config.VOICE_PROVIDER, voiceId: config.VOICE_ID },
@@ -109,43 +99,47 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
       },
       { headers: { Authorization: `Bearer ${config.VAPI_API_KEY}` } }
     );
-    console.log(`Started call ${response.data.id} for ${lead.phoneNumber}`);
+    callId = response.data.id;
+    console.log(`Started call ${callId} for ${lead.phoneNumber}`);
 
-    // Timeout: 2x ringing attempts + buffer
-    const timeoutMs = (2 * config.MAX_DURATION + 60) * 1000; // e.g., 120s if MAX_DURATION is 30s
+    const timeoutMs = (2 * config.MAX_DURATION + 60) * 1000;
     setTimeout(() => {
       const job = jobs.get(jobId);
-      if (job && job.phoneNumbers.find(p => p.id === phoneNumberId)?.inUse) {
-        console.warn(`Timeout: No webhook received for call to ${lead.phoneNumber}`);
-        handleCallResult(jobId, {
-          id: response.data.id,
-          status: 'ended',
-          endedReason: 'timeout',
-          analysis: { summary: '' }
-        }, lead, phoneNumberId);
+      if (!job || !job.phoneNumbers.find(p => p.id === phoneNumberId)?.inUse) return;
+
+      const { callResults } = require('../webhooks/vapiWebhook');
+      const pendingResult = callResults.get(callId);
+      if (pendingResult) {
+        handleCallResult(jobId, pendingResult, lead, phoneNumberId);
+        callResults.delete(callId);
+      } else {
+        console.warn(`Timeout: No webhook received for call ${callId} to ${lead.phoneNumber}`);
+        handleCallResult(jobId, { id: callId, status: 'ended', endedReason: 'timeout', analysis: { summary: '' } }, lead, phoneNumberId);
       }
     }, timeoutMs);
   } catch (error) {
     console.error(`Error calling ${lead.phoneNumber}:`, error.response?.data || error.message);
-    handleCallResult(jobId, {
-      id: "error-" + Date.now(),
-      status: "ended",
-      endedReason: "error",
-      analysis: { summary: "" }
-    }, lead, phoneNumberId);
+    const job = jobs.get(jobId);
+    if (job) {
+      job.activeCalls--;
+      const phone = job.phoneNumbers.find(p => p.id === phoneNumberId);
+      if (phone) phone.inUse = false;
+      job.results.push({ ...lead, verificationStatus: error.response?.data?.message || 'error' });
+      job.completed++;
+      processNextLeads(jobId);
+      if (job.completed === job.total) saveResultsToCSV(jobId);
+    }
   }
 };
 
-// Handle call result from webhook
 const handleCallResult = (jobId, callData, lead, phoneNumberId) => {
   const job = jobs.get(jobId);
   if (!job) return;
 
-  // Use summary if provided, otherwise raw endedReason
   const verificationStatus = callData.analysis?.summary || callData.endedReason || 'unknown';
-
   job.results.push({ ...lead, verificationStatus });
   job.completed++;
+  job.activeCalls--;
 
   const phone = job.phoneNumbers.find(p => p.id === phoneNumberId);
   if (phone) phone.inUse = false;
@@ -157,7 +151,6 @@ const handleCallResult = (jobId, callData, lead, phoneNumberId) => {
   }
 };
 
-// Save results to CSV
 const saveResultsToCSV = (jobId) => {
   const job = jobs.get(jobId);
   if (!job) return;
@@ -173,7 +166,6 @@ const saveResultsToCSV = (jobId) => {
   console.log(`Results saved for job ${jobId}`);
 };
 
-// Get job status
 const getJobStatus = (jobId) => {
   const job = jobs.get(jobId);
   if (!job) return null;
@@ -184,7 +176,6 @@ const getJobStatus = (jobId) => {
   };
 };
 
-// Get job results file path
 const getJobResultsPath = (jobId) => {
   return jobs.get(jobId) ? `results-${jobId}.csv` : null;
 };
