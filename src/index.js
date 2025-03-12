@@ -3,12 +3,16 @@ const config = require('./config');
 const verifyLeadsRoutes = require('./api/routes/verifyLeadsRoutes');
 const vapiWebhook = require('./webhooks/vapiWebhook');
 const fs = require('fs');
+const cors = require('cors'); // Add this line
 
 // Initialize Express app
 const app = express();
 
 // Middleware to parse JSON bodies
 app.use(express.json());
+app.use(cors({
+  origin: 'https://preview--lead-verification-master.lovable.app/' // Replace with your frontend URL
+}));
 
 // Create uploads directory if it doesn’t exist
 if (!fs.existsSync('uploads')) {
