@@ -37,7 +37,8 @@ const startVerificationJob = async (leads) => {
     phoneNumbers,
     total: leads.length,
     completed: 0,
-    activeCalls: 0
+    activeCalls: 0,
+    processedNumbers: new Set() // Track processed phone numbers
   });
 
   processNextLeads(jobId);
@@ -109,11 +110,11 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
       if (!job || !job.phoneNumbers.find(p => p.id === phoneNumberId)?.inUse) return;
 
       const pendingResult = callResults.get(callId);
-      if (pendingResult && !pendingResult.analysis.summary) {
+      if (pendingResult && !pendingResult.analysis?.summary) {
         console.warn(`Timeout: Using status-update for call ${callId} to ${lead.phoneNumber}`);
         handleCallResult(jobId, pendingResult, lead, phoneNumberId);
         callResults.delete(callId);
-      } else if (!pendingResult) {
+      } else if (!pendingResult && !job.processedNumbers.has(lead.phoneNumber)) {
         console.warn(`Timeout: No webhook received for call ${callId} to ${lead.phoneNumber}`);
         handleCallResult(jobId, { id: callId, status: 'ended', endedReason: 'timeout', analysis: { summary: '' } }, lead, phoneNumberId);
       }
@@ -135,12 +136,13 @@ const makeVerificationCall = async (jobId, lead, phoneNumberId) => {
 
 const handleCallResult = (jobId, callData, lead, phoneNumberId) => {
   const job = jobs.get(jobId);
-  if (!job) return;
+  if (!job || job.processedNumbers.has(lead.phoneNumber)) return;
 
   const verificationStatus = callData.analysis?.summary || callData.endedReason || 'unknown';
   job.results.push({ ...lead, verificationStatus });
   job.completed++;
   job.activeCalls--;
+  job.processedNumbers.add(lead.phoneNumber);
 
   const phone = job.phoneNumbers.find(p => p.id === phoneNumberId);
   if (phone) phone.inUse = false;

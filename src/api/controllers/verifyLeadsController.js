@@ -64,12 +64,10 @@ const getResult = (req, res) => {
     return error(res, 'Job not found or not completed', 404);
   }
 
-  // Send CSV file as download
-  res.download(filePath, `verification-results-${jobId}.csv`, (err) => {
-    if (err) {
-      error(res, 'Failed to send results', 500);
-    }
-  });
+  // Send CSV file with explicit headers
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="verification-results-${jobId}.csv"`);
+  fs.createReadStream(filePath).pipe(res);
 };
 
 module.exports = { submitLeads, getStatus, getResult };
