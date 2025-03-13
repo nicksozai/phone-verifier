@@ -14,16 +14,16 @@ app.use(express.json());
 // Configure CORS
 app.use(cors({
   origin: (origin, callback) => {
-    const allowedOrigin = 'https://lead-verification-master.vercel.app/';
+    const allowedOrigin = 'https://lead-verification-master.vercel.app'; // Updated to new frontend URL
     if (!origin || origin === allowedOrigin) {
       callback(null, allowedOrigin);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'OPTIONS'], // Explicitly allow these methods
-  allowedHeaders: ['Content-Type'],    // Allow JSON content type
-  credentials: false                   // No cookies/auth needed
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false
 }));
 
 // Create uploads directory if it doesn’t exist
