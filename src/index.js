@@ -14,7 +14,7 @@ app.use(express.json());
 // Configure CORS
 app.use(cors({
   origin: (origin, callback) => {
-    const allowedOrigin = 'https://preview--lead-verification-master.lovable.app';
+    const allowedOrigin = 'https://lead-verification-master.vercel.app/';
     if (!origin || origin === allowedOrigin) {
       callback(null, allowedOrigin);
     } else {
